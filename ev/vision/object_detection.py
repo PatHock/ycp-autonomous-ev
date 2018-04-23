@@ -20,9 +20,9 @@ if not cap.isOpened():
 
 
 def hough_transform(image):
-    min_line_length = 50
+    min_line_length = 25
     max_line_gap = 250
-    rho = 4
+    rho = 5
     threshold = 100
     theta = np.pi / 180
     return cv2.HoughLinesP(image, rho=rho, theta=theta, threshold=threshold,
@@ -31,11 +31,11 @@ def hough_transform(image):
 
 def mask_color(image):
     # define range of color white in HSV
-    lower_white = np.array([0, 0, 140])
+    lower_white = np.array([0, 0, 120])
     upper_white = np.array([255, 25, 255])
 
     # define range of color yellow in HSV
-    lower_yellow = np.array([15, 110, 80])
+    lower_yellow = np.array([15, 100, 80])
     upper_yellow = np.array([45, 255, 255])
 
     # Convert BGR to HSV
@@ -59,22 +59,34 @@ def mask_roi_overlay(image, mask_bounds_arr):
 
 
 def apply_perspective_transform(image):
-    dst = np.float32([[0, 0.33 * height], [0, 0], [0.9 * width, 0], [0.9 * width, 0.33 * height]])
+    dst = np.float32([[0, (TOP_HEIGHT - BOTTOM_HEIGHT)*height], [0, 0], [BOTTOM_WIDTH*width, 0], [BOTTOM_WIDTH * width, (TOP_HEIGHT-BOTTOM_HEIGHT)*height]])
     src = roiBounds.astype(np.float32, copy=False)
     m = cv2.getPerspectiveTransform(src, dst)
 
-    return cv2.warpPerspective(image, m, (int(0.9 * width), int(0.33 * height)))
+    return cv2.warpPerspective(image, m, (int(BOTTOM_WIDTH * width), int((TOP_HEIGHT - BOTTOM_HEIGHT) * height)))
+
+def undo_perspective_transform(image):
+    # dst = np.float32([[0, height - 1], [0, 0], [width - 1, 0],
+    #                   [width - 1, height - 1]])
+    dst = np.float32([[0, (TOP_HEIGHT - BOTTOM_HEIGHT)*height], [0, 0], [BOTTOM_WIDTH*width, 0], [BOTTOM_WIDTH * width, (TOP_HEIGHT-BOTTOM_HEIGHT)*height]])
+    src = roiBounds.astype(np.float32, copy=False)
+    m = cv2.getPerspectiveTransform(src, dst)
+    m = np.linalg.inv(m)
+
+    return cv2.warpPerspective(image, m, (width, height))
+
 
 
 def display_images():
     cv2.imshow('frame', frameRoiOverlay)
+    # cv2.imshow('lines', frameLinesHough)
     cv2.imshow('Canny', frameCanny)
-    cv2.imshow('transform', frameTransformedPerspective)
+    cv2.imshow('transform', frameTransPersp)
 
 
 def canny_edge_det(image):
-    threshold_1 = 50
-    threshold_2 = 250
+    threshold_1 = 100
+    threshold_2 = 200
     aperture_size = 3
 
     return cv2.Canny(image=image, threshold1=threshold_1,
@@ -107,11 +119,14 @@ while True:
 
         frameRoiOverlay = mask_roi_overlay(frame, roiBounds)
 
-        frameTransformedPerspective = apply_perspective_transform(frameColorMasked)
+        frameTransPersp = apply_perspective_transform(frameColorMasked)
 
-        frameCanny = canny_edge_det(frameTransformedPerspective)
+        frameCanny = canny_edge_det(frameTransPersp)
+        grayscale = cv2.cvtColor(cv2.cvtColor(frameTransPersp, cv2.COLOR_HSV2BGR), cv2.COLOR_BGR2GRAY)
 
         lines = hough_transform(frameCanny)
+
+        frameLinesHough = np.zeros(frameTransPersp.shape)
 
         if lines is not None:
             for i in range(0, len(lines)):
@@ -120,7 +135,12 @@ while True:
                     dy = y2 - y1
                     theta = np.arctan2(dy, dx) * 180 / np.pi
                     if 30 < abs(theta) < 80:
-                        cv2.line(frameTransformedPerspective, (x1, y1), (x2, y2), (0, 255, 0), 3)
+                        cv2.line(frameLinesHough, (x1, y1), (x2, y2), (0, 0, 255), 20)
+
+        test = undo_perspective_transform(frameLinesHough)
+
+        frameRoiOverlay = cv2.addWeighted(frameRoiOverlay, 0.5, test.astype(np.uint8, copy=False), 0.5, 0)
+
 
         display_images()
 
