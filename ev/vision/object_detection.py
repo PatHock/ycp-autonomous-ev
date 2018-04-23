@@ -6,15 +6,22 @@ object_detection.py
 # Identify yellow and white road markings
 # mask out anything above the horizon line
 # identify the edge of the road and mask out objects outside of the road
+# Patrick Hock April 23, 2018
+
+# Press escape to stop executing the program
 
 import cv2
 import numpy as np
+import os
+import Tkinter as tk
+import tkFileDialog
 
-# frame = cv2.imread('road_country.jpg', 1)
-# if frame is None:
-#     raise Exception("could not load image !")
+# File dialog to open video file
+root = tk.Tk
+root.filename = tkFileDialog.askopenfilename(initialdir=os.getcwd() + '/media', title="Select file",
+                                             filetypes=(("video files", "*.mp4"), ("all files", "*.*")))
 
-cap = cv2.VideoCapture('roadvideo.mp4')
+cap = cv2.VideoCapture(root.filename)
 if not cap.isOpened():
     print "Couldn't load video :("
 
@@ -59,16 +66,19 @@ def mask_roi_overlay(image, mask_bounds_arr):
 
 
 def apply_perspective_transform(image):
-    dst = np.float32([[0, (TOP_HEIGHT - BOTTOM_HEIGHT)*height], [0, 0], [BOTTOM_WIDTH*width, 0], [BOTTOM_WIDTH * width, (TOP_HEIGHT-BOTTOM_HEIGHT)*height]])
+    dst = np.float32([[0, (TOP_HEIGHT - BOTTOM_HEIGHT) * height], [0, 0], [BOTTOM_WIDTH * width, 0],
+                      [BOTTOM_WIDTH * width, (TOP_HEIGHT - BOTTOM_HEIGHT) * height]])
     src = roiBounds.astype(np.float32, copy=False)
     m = cv2.getPerspectiveTransform(src, dst)
 
     return cv2.warpPerspective(image, m, (int(BOTTOM_WIDTH * width), int((TOP_HEIGHT - BOTTOM_HEIGHT) * height)))
 
+
 def undo_perspective_transform(image):
     # dst = np.float32([[0, height - 1], [0, 0], [width - 1, 0],
     #                   [width - 1, height - 1]])
-    dst = np.float32([[0, (TOP_HEIGHT - BOTTOM_HEIGHT)*height], [0, 0], [BOTTOM_WIDTH*width, 0], [BOTTOM_WIDTH * width, (TOP_HEIGHT-BOTTOM_HEIGHT)*height]])
+    dst = np.float32([[0, (TOP_HEIGHT - BOTTOM_HEIGHT) * height], [0, 0], [BOTTOM_WIDTH * width, 0],
+                      [BOTTOM_WIDTH * width, (TOP_HEIGHT - BOTTOM_HEIGHT) * height]])
     src = roiBounds.astype(np.float32, copy=False)
     m = cv2.getPerspectiveTransform(src, dst)
     m = np.linalg.inv(m)
@@ -76,16 +86,14 @@ def undo_perspective_transform(image):
     return cv2.warpPerspective(image, m, (width, height))
 
 
-
 def display_images():
-    cv2.imshow('frame', frameRoiOverlay)
-    # cv2.imshow('lines', frameLinesHough)
+    cv2.imshow('frame', frameOverlay)
     cv2.imshow('Canny', frameCanny)
     cv2.imshow('transform', frameTransPersp)
 
 
 def canny_edge_det(image):
-    threshold_1 = 100
+    threshold_1 = 50
     threshold_2 = 200
     aperture_size = 3
 
@@ -101,13 +109,14 @@ while True:
         height = int(frame.shape[0])
         width = int(frame.shape[1])
 
-        # ROI trapezoid points
-        HORIZ_OFFSET = 0.01
+        # Region of interest (ROI) trapezoid points
+        HORIZ_OFFSET = 0.00
         BOTTOM_HEIGHT = 0.05
         BOTTOM_WIDTH = 0.85
         TOP_HEIGHT = 0.38
-        TOP_WIDTH = 0.10
+        TOP_WIDTH = 0.1
 
+        # Trapezoid point calculation
         BOTTOM_LEFT = [width * (0.5 * (1 - BOTTOM_WIDTH) + HORIZ_OFFSET), (1 - BOTTOM_HEIGHT) * height]
         BOTTOM_RIGHT = [width * (0.5 * (1 + BOTTOM_WIDTH) + HORIZ_OFFSET), (1 - BOTTOM_HEIGHT) * height]
         TOP_LEFT = [width * (0.5 * (1 - TOP_WIDTH) + HORIZ_OFFSET), (1 - TOP_HEIGHT) * height]
@@ -117,33 +126,35 @@ while True:
 
         frameColorMasked = mask_color(frame)
 
-        frameRoiOverlay = mask_roi_overlay(frame, roiBounds)
+        frameOverlay = mask_roi_overlay(frame, roiBounds)
 
         frameTransPersp = apply_perspective_transform(frameColorMasked)
 
         frameCanny = canny_edge_det(frameTransPersp)
-        grayscale = cv2.cvtColor(cv2.cvtColor(frameTransPersp, cv2.COLOR_HSV2BGR), cv2.COLOR_BGR2GRAY)
+        # grayscale = cv2.cvtColor(cv2.cvtColor(frameTransPersp, cv2.COLOR_HSV2BGR), cv2.COLOR_BGR2GRAY)
 
         lines = hough_transform(frameCanny)
 
         frameLinesHough = np.zeros(frameTransPersp.shape)
 
+        # Iterate through all lines returned from hough transform and add them to the
+        # hough lines frame if they are not near horizontal
         if lines is not None:
             for i in range(0, len(lines)):
                 for x1, y1, x2, y2 in lines[i]:
                     dx = x2 - x1
                     dy = y2 - y1
                     theta = np.arctan2(dy, dx) * 180 / np.pi
-                    if 30 < abs(theta) < 80:
+                    if 30 < abs(theta) < 90:
                         cv2.line(frameLinesHough, (x1, y1), (x2, y2), (0, 0, 255), 20)
 
-        test = undo_perspective_transform(frameLinesHough)
+        frameLineOverlay = undo_perspective_transform(frameLinesHough)
 
-        frameRoiOverlay = cv2.addWeighted(frameRoiOverlay, 0.5, test.astype(np.uint8, copy=False), 0.5, 0)
-
+        frameOverlay = cv2.addWeighted(frameOverlay, 0.7, frameLineOverlay.astype(np.uint8, copy=False), 0.3, 0)
 
         display_images()
 
+        # keyboard interrupt - Press escape to stop executing the program
         k = cv2.waitKey(20) & 0xFF
         if k == 27:
             break
